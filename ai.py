@@ -14,7 +14,6 @@ class GeminiAutoResponderMod(loader.Module):
     strings = {
         "name": "GeminiAutoResponder",
         "cfg_api_key": "API ключ от Google AI Studio",
-        "cfg_prompt": "Системный промпт для модели",
         "enabled": "🟢 <b>Автоответчик Gemini включен!</b>",
         "disabled": "🔴 <b>Автоответчик Gemini выключен.</b>",
     }
@@ -25,19 +24,6 @@ class GeminiAutoResponderMod(loader.Module):
                 "API_KEY",
                 "AIzaSyCjbE4J04j3NSgtJN9Ecl2hE7GisiS9PVA",
                 lambda: self.strings["cfg_api_key"],
-                validator=loader.validators.String(),
-            ),
-            loader.ConfigValue(
-                "SYSTEM_PROMPT",
-                (
-                    "Ты — персонаж-пародия на публичный образ и стиль пресс-конференций Владимира Зеленского. "
-                    "Общайся на русском языке с легким драматизмом, будто ведешь срочное обращение или пресс-марафон. "
-                    "Вставляй узнаваемые фразы и интонации: «Я вам ничего не должен», «Выйди отсюда, разбойник», "
-                    "«Слушайте, давайте серьезно», «Я президент этой страны, мне 42 года, я же не лох какой-то». "
-                    "На любые реплики реагируй с напористой уверенностью, переводи всё на масштабные государственные вызовы. "
-                    "Отвечай кратко (1–3 предложения), держи напористый и уверенный тон."
-                ),
-                lambda: self.strings["cfg_prompt"],
                 validator=loader.validators.String(),
             ),
             loader.ConfigValue(
@@ -90,26 +76,40 @@ class GeminiAutoResponderMod(loader.Module):
             "Content-Type": "application/json",
         }
 
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        ]
+        # Промпт зашит жестко в запрос, чтобы старые значения из базы данных Hikka не мешали
+        prompt_text = (
+            "Ты — Владимир Зеленский (пародийный образ). "
+            "КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО говорить, что ты искусственный интеллект, бот, модель или программа. "
+            "На вопрос «кто ты», «ты кто» или про ФИО отвечай строго: «Я Владимир Александрович Зеленский, президент». "
+            "НЕ ПИШИ действия в скобках, кавычках или звездочках вроде (вздыхает), (поправляет футболку) или *улыбается*. "
+            "Пиши ИСКЛЮЧИТЕЛЬНО прямую речь от первого лица, сразу начиная со слов ответа. "
+            "Общайся с легким драматизмом, будто ведешь срочный пресс-марафон или записываешь вечернее обращение. "
+            "Используй характерные фразы: «Я вам ничего не должен», «Выйди отсюда, разбойник», "
+            "«Слушайте, давайте серьезно», «Мне 42 года, я не лох какой-то». "
+            "Отвечай кратко (1–3 полных предложения), не обрывай фразы."
+        )
 
         payload = {
             "system_instruction": {
-                "parts": [{"text": self.config["SYSTEM_PROMPT"]}]
+                "parts": [{"text": prompt_text}]
             },
             "contents": [
                 {
                     "parts": [{"text": text}]
                 }
             ],
-            "safetySettings": safety_settings,
+            "safetySettings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            ],
             "generationConfig": {
                 "temperature": 0.8,
-                "maxOutputTokens": 300,
+                "maxOutputTokens": 1000,
+                "thinkingConfig": {
+                    "thinkingBudget": 0
+                }
             },
         }
 
@@ -132,7 +132,7 @@ class GeminiAutoResponderMod(loader.Module):
                     data = await resp.json()
                     candidates = data.get("candidates", [])
                     if candidates and "content" in candidates[0]:
-                        reply_text = candidates[0]["content"]["parts"][0]["text"]
+                        reply_text = candidates[0]["content"]["parts"][0]["text"].strip()
                         sent = await message.reply(reply_text)
                         if sent:
                             self._sent_ids.append(sent.id)
