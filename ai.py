@@ -9,14 +9,14 @@ logger = logging.getLogger(__name__)
 
 @loader.tds
 class GeminiAutoResponderMod(loader.Module):
-    """Автоматический ответчик на базе Google Gemini"""
+    """Автоматический ответчик на базе Google Gemini (початовой)"""
 
     strings = {
         "name": "GeminiAutoResponder",
         "cfg_api_key": "API ключ от Google AI Studio",
         "cfg_model": "Имя модели Gemini",
-        "enabled": "🟢 <b>Автоответчик Gemini включен!</b>",
-        "disabled": "🔴 <b>Автоответчик Gemini выключен.</b>",
+        "enabled": "🟢 <b>Автоответчик включен для этого чата!</b>",
+        "disabled": "🔴 <b>Автоответчик выключен для этого чата.</b>",
     }
 
     def __init__(self):
@@ -29,45 +29,47 @@ class GeminiAutoResponderMod(loader.Module):
             ),
             loader.ConfigValue(
                 "MODEL",
-                "gemini-3.5-flash-lite",
+                "gemini-2.0-flash",
                 lambda: self.strings["cfg_model"],
                 validator=loader.validators.String(),
             ),
-            loader.ConfigValue(
-                "STATUS",
-                True,
-                "Статус работы автоответчика (True/False)",
-                validator=loader.validators.Boolean(),
-            ),
         )
         self._sent_ids = collections.deque(maxlen=200)
+        self._active_chats = set()
 
     async def client_ready(self, client, db):
         self.client = client
-        logger.info(">>> [Gemini] МОДУЛЬ УСПЕШНО ЗАПУЩЕН <<<")
+        logger.info(">>> [Gemini] МОДУЛЬ УСПЕШНО ЗАПУЩЕН (ПРИВЯЗКА К ЧАТАМ) <<<")
 
     @loader.command()
     async def toggleai(self, message):
-        """Включить или выключить автоответчик"""
-        current = self.config["STATUS"]
-        self.config["STATUS"] = not current
-        await utils.answer(
-            message,
-            self.strings["enabled"] if not current else self.strings["disabled"],
-        )
+        """Включить/выключить автоответчик в текущем чате"""
+        chat_id = utils.get_chat_id(message)
+
+        if chat_id in self._active_chats:
+            self._active_chats.remove(chat_id)
+            await utils.answer(message, self.strings["disabled"])
+        else:
+            self._active_chats.add(chat_id)
+            await utils.answer(message, self.strings["enabled"])
 
     @loader.watcher(only_messages=True)
     async def watcher(self, message):
-        if not self.config["STATUS"]:
+        chat_id = utils.get_chat_id(message)
+
+        # Отвечаем ТОЛЬКО если автоответчик включен именно в этом чате
+        if chat_id not in self._active_chats:
             return
 
         text = getattr(message, "raw_text", None) or getattr(message, "text", None)
         if not text:
             return
 
+        # Игнорируем команды Hikka и других ботов
         if text.startswith((".", "!", "/", "busy", "hikka")):
             return
 
+        # Защита от бесконечного цикла самоответов
         if message.id in self._sent_ids:
             return
 
