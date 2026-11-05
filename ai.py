@@ -23,7 +23,7 @@ class GeminiAutoResponderMod(loader.Module):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "API_KEY",
-                "AQ.Ab8RN6I7v08PlwGFqlkf93C3QrscLQtOnmRzrIpE9AFpyHTgiA",
+                "AIzaSyCjbE4J04j3NSgtJN9Ecl2hE7GisiS9PVA",
                 lambda: self.strings["cfg_api_key"],
                 validator=loader.validators.String(),
             ),
@@ -72,7 +72,7 @@ class GeminiAutoResponderMod(loader.Module):
         if not text:
             return
 
-        # Игнорируем команды юзербота
+        # Игнорируем команды Hikka и других ботов
         if text.startswith((".", "!", "/", "busy", "hikka")):
             return
 
@@ -84,12 +84,10 @@ class GeminiAutoResponderMod(loader.Module):
         if not api_key:
             return
 
-        # Эндпоинт gemini-2.5-flash
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
 
         headers = {
             "Content-Type": "application/json",
-            "X-goog-api-key": api_key,
         }
 
         safety_settings = [
