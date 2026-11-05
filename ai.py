@@ -9,11 +9,12 @@ logger = logging.getLogger(__name__)
 
 @loader.tds
 class GeminiAutoResponderMod(loader.Module):
-    """Автоматический ответчик на базе Google Gemini 2.5 Flash"""
+    """Автоматический ответчик на базе Google Gemini"""
 
     strings = {
         "name": "GeminiAutoResponder",
         "cfg_api_key": "API ключ от Google AI Studio",
+        "cfg_model": "Имя модели Gemini",
         "enabled": "🟢 <b>Автоответчик Gemini включен!</b>",
         "disabled": "🔴 <b>Автоответчик Gemini выключен.</b>",
     }
@@ -22,8 +23,14 @@ class GeminiAutoResponderMod(loader.Module):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "API_KEY",
-                "fsdafasd",
+                "",
                 lambda: self.strings["cfg_api_key"],
+                validator=loader.validators.String(),
+            ),
+            loader.ConfigValue(
+                "MODEL",
+                "gemini-3.5-flash-lite",
+                lambda: self.strings["cfg_model"],
                 validator=loader.validators.String(),
             ),
             loader.ConfigValue(
@@ -37,7 +44,7 @@ class GeminiAutoResponderMod(loader.Module):
 
     async def client_ready(self, client, db):
         self.client = client
-        logger.info(">>> [Gemini] МОДУЛЬ 3.5 FLASH УСПЕШНО ЗАПУЩЕН <<<")
+        logger.info(">>> [Gemini] МОДУЛЬ УСПЕШНО ЗАПУЩЕН <<<")
 
     @loader.command()
     async def toggleai(self, message):
@@ -58,11 +65,9 @@ class GeminiAutoResponderMod(loader.Module):
         if not text:
             return
 
-        # Игнорируем команды Hikka и других ботов
         if text.startswith((".", "!", "/", "busy", "hikka")):
             return
 
-        # Защита от бесконечного цикла самоответов
         if message.id in self._sent_ids:
             return
 
@@ -70,13 +75,13 @@ class GeminiAutoResponderMod(loader.Module):
         if not api_key:
             return
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={api_key}"
+        model_name = self.config["MODEL"]
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
 
         headers = {
             "Content-Type": "application/json",
         }
 
-        # Промпт зашит жестко в запрос, чтобы старые значения из базы данных Hikka не мешали
         prompt_text = (
             "Ты — Владимир Зеленский (пародийный образ). "
             "КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО говорить, что ты искусственный интеллект, бот, модель или программа. "
@@ -106,10 +111,7 @@ class GeminiAutoResponderMod(loader.Module):
             ],
             "generationConfig": {
                 "temperature": 0.8,
-                "maxOutputTokens": 1000,
-                "thinkingConfig": {
-                    "thinkingBudget": 0
-                }
+                "maxOutputTokens": 600,
             },
         }
 
