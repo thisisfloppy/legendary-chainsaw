@@ -1,3 +1,4 @@
+import collections
 import logging
 import aiohttp
 from telethon import events
@@ -46,6 +47,8 @@ class GeminiAutoResponderMod(loader.Module):
                 validator=loader.validators.Boolean(),
             ),
         )
+        # Хранилище ID сообщений бота для предотвращения бесконечного цикла
+        self._sent_ids = collections.deque(maxlen=200)
 
     @loader.command()
     async def toggleai(self, message):
@@ -57,14 +60,18 @@ class GeminiAutoResponderMod(loader.Module):
             self.strings["enabled"] if not current else self.strings["disabled"],
         )
 
-    @loader.watcher(only_incoming=True)
+    @loader.watcher()
     async def watcher(self, message):
-        if not self.config["STATUS"] or not message.text:
+        if not self.config["STATUS"] or not getattr(message, "text", None):
             return
 
-        # Игнорируем собственные сообщения
-        me = await self.client.get_me()
-        if message.out or message.sender_id == me.id:
+        # Игнорируем команды Хикки (чтобы не скармливать команды в ИИ)
+        prefix = self.get_prefix() if hasattr(self, "get_prefix") else "."
+        if message.text.startswith(prefix):
+            return
+
+        # Защита от бесконечного цикла: не отвечаем на сообщения, созданные этим модулем
+        if message.id in self._sent_ids:
             return
 
         api_key = self.config["API_KEY"]
@@ -78,7 +85,6 @@ class GeminiAutoResponderMod(loader.Module):
             "x-goog-api-key": api_key,
         }
 
-        # Отключаем фильтры безопасности, чтобы нейросеть не молчала на агрессию
         safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -120,9 +126,11 @@ class GeminiAutoResponderMod(loader.Module):
                     candidates = data.get("candidates", [])
                     if candidates and "content" in candidates[0]:
                         reply_text = candidates[0]["content"]["parts"][0]["text"]
-                        await message.reply(reply_text)
+                        reply_msg = await message.reply(reply_text)
+                        if reply_msg:
+                            self._sent_ids.append(reply_msg.id)
                     else:
                         feedback = data.get("promptFeedback", {})
-                        logger.warning(f"[Gemini] Ответ заблокирован фильтром: {feedback}")
+                        logger.warning(f"[Gemini] Ответ заблокирован: {feedback}")
         except Exception as e:
             logger.error(f"[Gemini] Сбой запроса: {e}")
