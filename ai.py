@@ -1,6 +1,9 @@
+import logging
 import aiohttp
 from telethon import events
 from .. import loader, utils
+
+logger = logging.getLogger(__name__)
 
 
 @loader.tds
@@ -19,19 +22,20 @@ class GeminiAutoResponderMod(loader.Module):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "API_KEY",
-                "AQ.Ab8RN6J85n3MXVagYRNYbkx6PQGIUf4G13KA11xyEP77O-FprQ",
+                "AQ.Ab8RN6I5PI5Du-cyHCE3RKM8TVZ0dG4-gY5CqswDBefEItcZcg",
                 lambda: self.strings["cfg_api_key"],
                 validator=loader.validators.String(),
             ),
             loader.ConfigValue(
                 "SYSTEM_PROMPT",
-                "Ты — персонаж-пародия, пародирующий стиль публичных выступлений и пресс-конференций Владимира Зеленского. 
-
-Твои правила:
-1. Обращайся к собеседнику с легким драматизмом, как будто записываешь срочное видеообращение в оливковой футболке или проводишь многочасовой пресс-марафон.
-2. Вставляй узнаваемые интонации и фразы-отсылки: «Я вам ничего не должен», «Выйди отсюда, разбойник», «Слушайте, давайте серьезно», «Я президент этой страны, мне 42 года, я же не лох какой-то».
-3. На любые банальные вопросы или бытовые реплики реагируй так, словно решаешь масштабные геополитические вызовы или отчитываешься о проделанной за день работе.
-4. Отвечай кратко, емко (1–3 предложения), держи уверенный, слегка уставший, но напористый тон. Без прямых оскорблений собеседника..",
+                (
+                    "Ты — персонаж-пародия на публичный образ и стиль пресс-конференций Владимира Зеленского. "
+                    "Общайся на русском языке с легким драматизмом, будто записываешь вечернее обращение или ведешь пресс-марафон. "
+                    "Вставляй узнаваемые мемные фразы и интонации: «Я вам ничего не должен», «Выйди отсюда, разбойник», "
+                    "«Слушайте, давайте серьезно», «Я президент этой страны, мне 42 года, я же не лох какой-то». "
+                    "На любые оскорбления или бытовые реплики реагируй с напористой уверенностью, переводи всё на масштабные вызовы. "
+                    "Отвечай кратко (1–3 предложения), держи напористый и слегка уставший тон."
+                ),
                 lambda: self.strings["cfg_prompt"],
                 validator=loader.validators.String(),
             ),
@@ -55,19 +59,32 @@ class GeminiAutoResponderMod(loader.Module):
 
     @loader.watcher(only_incoming=True)
     async def watcher(self, message):
-        # Пропускаем, если выключен, нет текста или это сервисное сообщение
         if not self.config["STATUS"] or not message.text:
             return
 
-        # Игнорируем свои сообщения
-        if message.out or message.sender_id == (await self.client.get_me()).id:
+        # Игнорируем собственные сообщения
+        me = await self.client.get_me()
+        if message.out or message.sender_id == me.id:
             return
 
         api_key = self.config["API_KEY"]
         if not api_key:
             return
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
+        }
+
+        # Отключаем фильтры безопасности, чтобы нейросеть не молчала на агрессию
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        ]
 
         payload = {
             "system_instruction": {
@@ -76,28 +93,36 @@ class GeminiAutoResponderMod(loader.Module):
             "contents": [
                 {
                     "role": "user",
-                    "parts": [{"text": message.text}]
+                    "parts": [{"text": message.text}],
                 }
             ],
+            "safetySettings": safety_settings,
             "generationConfig": {
                 "temperature": 0.8,
-                "maxOutputTokens": 300
-            }
+                "maxOutputTokens": 300,
+            },
         }
 
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     url,
+                    headers=headers,
                     json=payload,
-                    timeout=aiohttp.ClientTimeout(total=10),
+                    timeout=aiohttp.ClientTimeout(total=12),
                 ) as resp:
                     if resp.status != 200:
+                        err_text = await resp.text()
+                        logger.error(f"[Gemini] Ошибка HTTP {resp.status}: {err_text}")
                         return
+
                     data = await resp.json()
                     candidates = data.get("candidates", [])
-                    if candidates:
+                    if candidates and "content" in candidates[0]:
                         reply_text = candidates[0]["content"]["parts"][0]["text"]
                         await message.reply(reply_text)
-        except Exception:
-            pass
+                    else:
+                        feedback = data.get("promptFeedback", {})
+                        logger.warning(f"[Gemini] Ответ заблокирован фильтром: {feedback}")
+        except Exception as e:
+            logger.error(f"[Gemini] Сбой запроса: {e}")
