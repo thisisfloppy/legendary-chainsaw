@@ -31,11 +31,10 @@ class GeminiAutoResponderMod(loader.Module):
                 "SYSTEM_PROMPT",
                 (
                     "Ты — персонаж-пародия на публичный образ и стиль пресс-конференций Владимира Зеленского. "
-                    "Общайся на русском языке с легким драматизмом, будто записываешь вечернее обращение или ведешь пресс-марафон. "
-                    "Вставляй узнаваемые мемные фразы и интонации: «Я вам ничего не должен», «Выйди отсюда, разбойник», "
+                    "Общайся на русском языке с легким драматизмом, будто ведешь срочное обращение или пресс-марафон. "
+                    "Используй характерные фразы: «Я вам ничего не должен», «Выйди отсюда, разбойник», "
                     "«Слушайте, давайте серьезно», «Я президент этой страны, мне 42 года, я же не лох какой-то». "
-                    "На любые оскорбления или бытовые реплики реагируй с напористой уверенностью, переводи всё на масштабные вызовы. "
-                    "Отвечай кратко (1–3 предложения), держи напористый и слегка уставший тон."
+                    "Отвечай кратко (1–3 предложения), держи напористый и уверенный тон."
                 ),
                 lambda: self.strings["cfg_prompt"],
                 validator=loader.validators.String(),
@@ -47,8 +46,11 @@ class GeminiAutoResponderMod(loader.Module):
                 validator=loader.validators.Boolean(),
             ),
         )
-        # Хранилище ID сообщений бота для предотвращения бесконечного цикла
         self._sent_ids = collections.deque(maxlen=200)
+
+    async def client_ready(self, client, db):
+        self.client = client
+        logger.info(">>> [Gemini] МОДУЛЬ УСПЕШНО ИНИЦИАЛИЗИРОВАН В HIKKA <<<")
 
     @loader.command()
     async def toggleai(self, message):
@@ -60,17 +62,21 @@ class GeminiAutoResponderMod(loader.Module):
             self.strings["enabled"] if not current else self.strings["disabled"],
         )
 
-    @loader.watcher()
+    # Чистый watcher без неподдерживаемых аргументов ловит весь входящий и исходящий трафик
+    @loader.watcher(only_messages=True)
     async def watcher(self, message):
-        if not self.config["STATUS"] or not getattr(message, "text", None):
+        if not self.config["STATUS"]:
             return
 
-        # Игнорируем команды Хикки (чтобы не скармливать команды в ИИ)
-        prefix = self.get_prefix() if hasattr(self, "get_prefix") else "."
-        if message.text.startswith(prefix):
+        text = getattr(message, "raw_text", None) or getattr(message, "text", None)
+        if not text:
             return
 
-        # Защита от бесконечного цикла: не отвечаем на сообщения, созданные этим модулем
+        # Игнорируем команды юзербота и сторонних ботов
+        if text.startswith((".", "!", "/", "busy", "hikka")):
+            return
+
+        # Защита от бесконечного цикла самоответов
         if message.id in self._sent_ids:
             return
 
@@ -78,7 +84,9 @@ class GeminiAutoResponderMod(loader.Module):
         if not api_key:
             return
 
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        logger.info(f"[Gemini] Обработка сообщения: {text[:40]}...")
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
 
         headers = {
             "Content-Type": "application/json",
@@ -99,7 +107,7 @@ class GeminiAutoResponderMod(loader.Module):
             "contents": [
                 {
                     "role": "user",
-                    "parts": [{"text": message.text}],
+                    "parts": [{"text": text}],
                 }
             ],
             "safetySettings": safety_settings,
@@ -120,17 +128,21 @@ class GeminiAutoResponderMod(loader.Module):
                     if resp.status != 200:
                         err_text = await resp.text()
                         logger.error(f"[Gemini] Ошибка HTTP {resp.status}: {err_text}")
+                        sent = await message.reply(f"⚠️ Ошибка Gemini [{resp.status}]: {err_text[:100]}")
+                        if sent:
+                            self._sent_ids.append(sent.id)
                         return
 
                     data = await resp.json()
                     candidates = data.get("candidates", [])
                     if candidates and "content" in candidates[0]:
                         reply_text = candidates[0]["content"]["parts"][0]["text"]
-                        reply_msg = await message.reply(reply_text)
-                        if reply_msg:
-                            self._sent_ids.append(reply_msg.id)
+                        sent = await message.reply(reply_text)
+                        if sent:
+                            self._sent_ids.append(sent.id)
                     else:
-                        feedback = data.get("promptFeedback", {})
-                        logger.warning(f"[Gemini] Ответ заблокирован: {feedback}")
+                        sent = await message.reply("⚠️ Ответ отклонен фильтром Gemini.")
+                        if sent:
+                            self._sent_ids.append(sent.id)
         except Exception as e:
-            logger.error(f"[Gemini] Сбой запроса: {e}")
+            logger.error(f"[Gemini] Исключение: {e}")
