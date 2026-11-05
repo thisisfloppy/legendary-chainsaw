@@ -23,7 +23,7 @@ class GeminiAutoResponderMod(loader.Module):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "API_KEY",
-                "AQ.Ab8RN6I5PI5Du-cyHCE3RKM8TVZ0dG4-gY5CqswDBefEItcZcg",
+                "AQ.Ab8RN6I5Pl5Du-cyHCE3RKM8TVZ0dG4-gY5CqswDBefEItcZcg",
                 lambda: self.strings["cfg_api_key"],
                 validator=loader.validators.String(),
             ),
@@ -31,10 +31,11 @@ class GeminiAutoResponderMod(loader.Module):
                 "SYSTEM_PROMPT",
                 (
                     "Ты — персонаж-пародия на публичный образ и стиль пресс-конференций Владимира Зеленского. "
-                    "Общайся на русском языке с легким драматизмом, будто ведешь срочное обращение или пресс-марафон. "
-                    "Используй характерные фразы: «Я вам ничего не должен», «Выйди отсюда, разбойник», "
+                    "Общайся на русском языке с легким драматизмом, будто ведешь срочное видеообращение или пресс-марафон. "
+                    "Вставляй узнаваемые цитаты и интонации: «Я вам ничего не должен», «Выйди отсюда, разбойник», "
                     "«Слушайте, давайте серьезно», «Я президент этой страны, мне 42 года, я же не лох какой-то». "
-                    "Отвечай кратко (1–3 предложения), держи напористый и уверенный тон."
+                    "На любые реплики и подколы реагируй с напористой уверенностью, переводи всё на масштабные вызовы. "
+                    "Отвечай кратко (1–3 предложения), держи напористый и слегка уставший тон."
                 ),
                 lambda: self.strings["cfg_prompt"],
                 validator=loader.validators.String(),
@@ -62,7 +63,6 @@ class GeminiAutoResponderMod(loader.Module):
             self.strings["enabled"] if not current else self.strings["disabled"],
         )
 
-    # Чистый watcher без неподдерживаемых аргументов ловит весь входящий и исходящий трафик
     @loader.watcher(only_messages=True)
     async def watcher(self, message):
         if not self.config["STATUS"]:
@@ -72,7 +72,7 @@ class GeminiAutoResponderMod(loader.Module):
         if not text:
             return
 
-        # Игнорируем команды юзербота и сторонних ботов
+        # Игнорируем команды Hikka и других ботов
         if text.startswith((".", "!", "/", "busy", "hikka")):
             return
 
@@ -84,21 +84,13 @@ class GeminiAutoResponderMod(loader.Module):
         if not api_key:
             return
 
-        logger.info(f"[Gemini] Обработка сообщения: {text[:40]}...")
-
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        # Точный эндпоинт из cURL (без ?key= в конце)
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
 
         headers = {
             "Content-Type": "application/json",
-            "x-goog-api-key": api_key,
+            "X-goog-api-key": api_key,
         }
-
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        ]
 
         payload = {
             "system_instruction": {
@@ -106,11 +98,15 @@ class GeminiAutoResponderMod(loader.Module):
             },
             "contents": [
                 {
-                    "role": "user",
-                    "parts": [{"text": text}],
+                    "parts": [{"text": text}]
                 }
             ],
-            "safetySettings": safety_settings,
+            "safetySettings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            ],
             "generationConfig": {
                 "temperature": 0.8,
                 "maxOutputTokens": 300,
@@ -123,12 +119,12 @@ class GeminiAutoResponderMod(loader.Module):
                     url,
                     headers=headers,
                     json=payload,
-                    timeout=aiohttp.ClientTimeout(total=12),
+                    timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
                     if resp.status != 200:
                         err_text = await resp.text()
                         logger.error(f"[Gemini] Ошибка HTTP {resp.status}: {err_text}")
-                        sent = await message.reply(f"⚠️ Ошибка Gemini [{resp.status}]: {err_text[:100]}")
+                        sent = await message.reply(f"⚠️ Ошибка Gemini [{resp.status}]: {err_text[:120]}")
                         if sent:
                             self._sent_ids.append(sent.id)
                         return
@@ -141,7 +137,7 @@ class GeminiAutoResponderMod(loader.Module):
                         if sent:
                             self._sent_ids.append(sent.id)
                     else:
-                        sent = await message.reply("⚠️ Ответ отклонен фильтром Gemini.")
+                        sent = await message.reply("⚠️ Ответ отклонен фильтром безопасности.")
                         if sent:
                             self._sent_ids.append(sent.id)
         except Exception as e:
