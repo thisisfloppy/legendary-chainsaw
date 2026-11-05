@@ -22,7 +22,7 @@ class GeminiAutoResponderMod(loader.Module):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "API_KEY",
-                "AIzaSyCjbE4J04j3NSgtJN9Ecl2hE7GisiS9PVA",
+                "fsdafasd",
                 lambda: self.strings["cfg_api_key"],
                 validator=loader.validators.String(),
             ),
@@ -37,7 +37,7 @@ class GeminiAutoResponderMod(loader.Module):
 
     async def client_ready(self, client, db):
         self.client = client
-        logger.info(">>> [Gemini] МОДУЛЬ 2.5 FLASH УСПЕШНО ЗАПУЩЕН <<<")
+        logger.info(">>> [Gemini] МОДУЛЬ 3.5 FLASH УСПЕШНО ЗАПУЩЕН <<<")
 
     @loader.command()
     async def toggleai(self, message):
@@ -70,7 +70,7 @@ class GeminiAutoResponderMod(loader.Module):
         if not api_key:
             return
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={api_key}"
 
         headers = {
             "Content-Type": "application/json",
